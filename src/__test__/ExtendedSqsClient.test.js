@@ -10,9 +10,9 @@ const testMessageAttribute = {
     DataType: 'String',
     StringValue: 'attr value',
 };
-const s3MessageBodyKeyAttribute = {
-    DataType: 'String',
-    StringValue: `(test-bucket)${mockS3Key}`,
+const messageSizeKeyAttribute = {
+    DataType: 'Number',
+    StringValue: '5242880',
 };
 
 describe('ExtendedSqsClient sendMessage', () => {
@@ -78,10 +78,13 @@ describe('ExtendedSqsClient sendMessage', () => {
         expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
         expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
             QueueUrl: 'test-queue',
-            MessageBody: mockS3Key,
+            MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
             MessageAttributes: {
                 MessageAttribute: testMessageAttribute,
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                SQSLargePayloadSize: {
+                    DataType: "Number",
+                    StringValue: "4194336",
+                },
             },
         });
     });
@@ -127,10 +130,13 @@ describe('ExtendedSqsClient sendMessage', () => {
         expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
         expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
             QueueUrl: 'test-queue',
-            MessageBody: mockS3Key,
+            MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
             MessageAttributes: {
                 MessageAttribute: testMessageAttribute,
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                SQSLargePayloadSize: {
+                    DataType: "Number",
+                    StringValue: "4194336",
+                },
             },
         });
     });
@@ -173,10 +179,13 @@ describe('ExtendedSqsClient sendMessage', () => {
         expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
         expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
             QueueUrl: 'test-queue',
-            MessageBody: mockS3Key,
+            MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
             MessageAttributes: {
                 MessageAttribute: testMessageAttribute,
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                SQSLargePayloadSize: {
+                    DataType: "Number",
+                    StringValue: "4194336"
+                },
             },
         });
     });
@@ -215,58 +224,18 @@ describe('ExtendedSqsClient sendMessage', () => {
         expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
         expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
             QueueUrl: 'test-queue',
-            MessageBody: mockS3Key,
+            MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
             MessageAttributes: {
                 MessageAttribute: testMessageAttribute,
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                SQSLargePayloadSize: {
+                    DataType: "Number",
+                    StringValue: "50",
+                },
             },
         });
     });
 
-    it('should apply custom sendTransform function', async () => {
-        // Given
-        const sqs = {
-            sendMessage: jest.fn(() => ({ promise: () => Promise.resolve('success') })),
-        };
-        const s3 = {
-            putObject: jest.fn(() => ({ promise: () => Promise.resolve() })),
-        };
-
-        const client = new ExtendedSqsClient(sqs, s3, {
-            bucketName: 'test-bucket',
-            sendTransform: (message) => ({
-                messageBody: `custom ${message.MessageBody}`,
-                s3Content: 'custom s3 content',
-            }),
-        });
-
-        // When
-        await client
-            .sendMessage({
-                QueueUrl: 'test-queue',
-                MessageBody: 'message body',
-            })
-            .promise();
-
-        // Then
-        expect(s3.putObject).toHaveBeenCalledTimes(1);
-        expect(s3.putObject.mock.calls[0][0]).toEqual({
-            Bucket: 'test-bucket',
-            Key: mockS3Key,
-            Body: 'custom s3 content',
-        });
-
-        expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
-        expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
-            QueueUrl: 'test-queue',
-            MessageBody: 'custom message body',
-            MessageAttributes: {
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
-            },
-        });
-    });
-
-    it('should respect existing S3MessageBodyKey', async () => {
+    it('should ignore existing SQSLargePayloadSize', async () => {
         // Given
         const sqs = {
             sendMessage: jest.fn(() => ({ promise: () => Promise.resolve('success') })),
@@ -284,7 +253,7 @@ describe('ExtendedSqsClient sendMessage', () => {
         await client
             .sendMessage({
                 QueueUrl: 'test-queue',
-                MessageAttributes: { S3MessageBodyKey: s3MessageBodyKeyAttribute },
+                MessageAttributes: { SQSLargePayloadSize: messageSizeKeyAttribute },
                 MessageBody: 'message body',
             })
             .promise();
@@ -293,13 +262,16 @@ describe('ExtendedSqsClient sendMessage', () => {
         expect(sqs.sendMessage).toHaveBeenCalledTimes(1);
         expect(sqs.sendMessage.mock.calls[0][0]).toEqual({
             QueueUrl: 'test-queue',
-            MessageBody: s3MessageBodyKeyAttribute.StringValue,
+            MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
             MessageAttributes: {
-                S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                SQSLargePayloadSize: {
+                    DataType: "Number",
+                    StringValue: "44"
+                },
             },
         });
 
-        expect(s3.putObject).toHaveBeenCalledTimes(0);
+        expect(s3.putObject).toHaveBeenCalledTimes(1);
     });
 
     it('should throw SQS error (using promise())', async () => {
@@ -473,12 +445,12 @@ describe('ExtendedSqsClient sendMessageBatch', () => {
         expect(s3.putObject).toHaveBeenCalledTimes(2);
         expect(s3.putObject.mock.calls[0][0]).toEqual({
             Bucket: 'test-bucket',
-            Key: mockS3Key,
+            Key: '1234-5678',
             Body: largeMessageBody1,
         });
         expect(s3.putObject.mock.calls[1][0]).toEqual({
             Bucket: 'test-bucket',
-            Key: mockS3Key,
+            Key: '1234-5678',
             Body: largeMessageBody2,
         });
 
@@ -488,8 +460,8 @@ describe('ExtendedSqsClient sendMessageBatch', () => {
             Entries: [
                 {
                     Id: '1',
-                    MessageBody: mockS3Key,
-                    MessageAttributes: { S3MessageBodyKey: s3MessageBodyKeyAttribute },
+                    MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
+                    MessageAttributes: { SQSLargePayloadSize: messageSizeKeyAttribute },
                 },
                 {
                     Id: '2',
@@ -497,8 +469,8 @@ describe('ExtendedSqsClient sendMessageBatch', () => {
                 },
                 {
                     Id: '3',
-                    MessageBody: mockS3Key,
-                    MessageAttributes: { S3MessageBodyKey: s3MessageBodyKeyAttribute },
+                    MessageBody: "[\"com.amazon.sqs.javamessaging.MessageS3Pointer\",{\"s3BucketName\":\"test-bucket\",\"s3Key\":\"1234-5678\"}]",
+                    MessageAttributes: { SQSLargePayloadSize: messageSizeKeyAttribute },
                 },
             ],
         });
@@ -536,7 +508,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
         // Then
         expect(sqs.receiveMessage).toHaveBeenCalledTimes(1);
         expect(sqs.receiveMessage.mock.calls[0][0]).toEqual({
-            MessageAttributeNames: ['MessageAttribute', 'S3MessageBodyKey'],
+            MessageAttributeNames: ['MessageAttribute', 'SQSLargePayloadSize'],
             QueueUrl: 'test-queue',
         });
 
@@ -548,11 +520,14 @@ describe('ExtendedSqsClient receiveMessage', () => {
         const messages = {
             Messages: [
                 {
-                    Body: '8765-4321',
+                    Body: JSON.stringify([
+                        "com.amazon.sqs.javamessaging.MessageS3Pointer",
+                        { s3BucketName: 'test-bucket', s3Key: mockS3Key }
+                    ]),
                     ReceiptHandle: 'receipthandle',
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -581,7 +556,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
         // Then
         expect(sqs.receiveMessage).toHaveBeenCalledTimes(1);
         expect(sqs.receiveMessage.mock.calls[0][0]).toEqual({
-            MessageAttributeNames: ['MessageAttribute', 'S3MessageBodyKey'],
+            MessageAttributeNames: ['MessageAttribute', 'SQSLargePayloadSize'],
             QueueUrl: 'test-queue',
         });
 
@@ -598,7 +573,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
                     ReceiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -610,11 +585,14 @@ describe('ExtendedSqsClient receiveMessage', () => {
         const messages = {
             Messages: [
                 {
-                    Body: '8765-4321',
+                    Body: JSON.stringify([
+                        "com.amazon.sqs.javamessaging.MessageS3Pointer",
+                        { s3BucketName: 'test-bucket', s3Key: mockS3Key }
+                    ]),
                     ReceiptHandle: 'receipthandle',
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -648,7 +626,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
         // Then
         expect(sqs.receiveMessage).toHaveBeenCalledTimes(1);
         expect(sqs.receiveMessage.mock.calls[0][0]).toEqual({
-            MessageAttributeNames: ['MessageAttribute', 'S3MessageBodyKey'],
+            MessageAttributeNames: ['MessageAttribute', 'SQSLargePayloadSize'],
             QueueUrl: 'test-queue',
         });
 
@@ -665,7 +643,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
                     ReceiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -677,11 +655,14 @@ describe('ExtendedSqsClient receiveMessage', () => {
         const messages = {
             Messages: [
                 {
-                    Body: '8765-4321',
+                    Body: JSON.stringify([
+                        "com.amazon.sqs.javamessaging.MessageS3Pointer",
+                        { s3BucketName: 'test-bucket', s3Key: mockS3Key }
+                    ]),
                     ReceiptHandle: 'receipthandle',
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -714,7 +695,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
         // Then
         expect(sqs.receiveMessage).toHaveBeenCalledTimes(1);
         expect(sqs.receiveMessage.mock.calls[0][0]).toEqual({
-            MessageAttributeNames: ['MessageAttribute', 'S3MessageBodyKey'],
+            MessageAttributeNames: ['MessageAttribute', 'SQSLargePayloadSize'],
             QueueUrl: 'test-queue',
         });
 
@@ -731,68 +712,7 @@ describe('ExtendedSqsClient receiveMessage', () => {
                     ReceiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                    },
-                },
-            ],
-        });
-    });
-
-    it('should apply custom receiveTransform function', async () => {
-        // Given
-        const messages = {
-            Messages: [
-                {
-                    Body: 'custom message body',
-                    ReceiptHandle: 'receipthandle',
-                    MessageAttributes: {
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                    },
-                },
-            ],
-        };
-        const sqs = {
-            receiveMessage: jest.fn(() => ({ promise: () => Promise.resolve(messages) })),
-        };
-
-        const s3Response = {
-            Body: Buffer.from('custom s3 content'),
-        };
-        const s3 = {
-            getObject: jest.fn(() => ({ promise: () => Promise.resolve(s3Response) })),
-        };
-
-        const client = new ExtendedSqsClient(sqs, s3, {
-            receiveTransform: (message, s3Content) => `${message.Body} - ${s3Content}`,
-        });
-
-        // When
-        const response = await client
-            .receiveMessage({
-                QueueUrl: 'test-queue',
-            })
-            .promise();
-
-        // Then
-        expect(sqs.receiveMessage).toHaveBeenCalledTimes(1);
-        expect(sqs.receiveMessage.mock.calls[0][0]).toEqual({
-            MessageAttributeNames: ['S3MessageBodyKey'],
-            QueueUrl: 'test-queue',
-        });
-
-        expect(s3.getObject).toHaveBeenCalledTimes(1);
-        expect(s3.getObject.mock.calls[0][0]).toEqual({
-            Bucket: 'test-bucket',
-            Key: mockS3Key,
-        });
-
-        expect(response).toEqual({
-            Messages: [
-                {
-                    Body: 'custom message body - custom s3 content',
-                    ReceiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
-                    MessageAttributes: {
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -868,11 +788,14 @@ describe('ExtendedSqsClient receiveMessage', () => {
         const messages = {
             Messages: [
                 {
-                    Body: '8765-4321',
+                    Body: JSON.stringify([
+                        "com.amazon.sqs.javamessaging.MessageS3Pointer",
+                        { s3BucketName: 'test-bucket', s3Key: '8765-4321' }
+                    ]),
                     ReceiptHandle: 'receipthandle',
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -911,11 +834,14 @@ describe('ExtendedSqsClient receiveMessage', () => {
         const messages = {
             Messages: [
                 {
-                    Body: '8765-4321',
+                    Body: JSON.stringify([
+                        "com.amazon.sqs.javamessaging.MessageS3Pointer",
+                        { s3BucketName: 'test-bucket', s3Key: '8765-4321' }
+                    ]),
                     ReceiptHandle: 'receipthandle',
                     MessageAttributes: {
                         MessageAttribute: testMessageAttribute,
-                        S3MessageBodyKey: s3MessageBodyKeyAttribute,
+                        SQSLargePayloadSize: messageSizeKeyAttribute,
                     },
                 },
             ],
@@ -1169,139 +1095,5 @@ describe('ExtendedSqsClient changeMessageVisibilityBatch', () => {
                 },
             ],
         });
-    });
-});
-
-describe('ExtendedSqsClient middleware', () => {
-    it('should handle a message not using S3', async () => {
-        // Given
-        const handler = {
-            event: {
-                Records: [
-                    {
-                        body: 'message body',
-                        receiptHandle: 'receipthandle',
-                        messageAttributes: {
-                            messageAttribute: testMessageAttribute,
-                        },
-                    },
-                ],
-            },
-        };
-
-        const middleware = new ExtendedSqsClient({}, {}, { bucketName: 'test-bucket' }).middleware();
-
-        // When
-        await middleware.before(handler);
-
-        // Then
-        expect(handler.event.Records).toEqual([
-            {
-                body: 'message body',
-                receiptHandle: 'receipthandle',
-                messageAttributes: {
-                    messageAttribute: testMessageAttribute,
-                },
-            },
-        ]);
-    });
-
-    it('should handle a message using S3', async () => {
-        // Given
-        const handler = {
-            event: {
-                Records: [
-                    {
-                        body: 'message body',
-                        receiptHandle: 'receipthandle',
-                        messageAttributes: {
-                            MessageAttribute: testMessageAttribute,
-                            S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                        },
-                    },
-                ],
-            },
-        };
-
-        const s3Content = {
-            Body: Buffer.from('message body'),
-        };
-        const s3 = {
-            getObject: jest.fn(() => ({ promise: () => Promise.resolve(s3Content) })),
-        };
-
-        const middleware = new ExtendedSqsClient({}, s3, { bucketName: 'test-bucket' }).middleware();
-
-        // When
-        await middleware.before(handler)
-
-        // Then
-        expect(s3.getObject).toHaveBeenCalledTimes(1);
-        expect(s3.getObject.mock.calls[0][0]).toEqual({
-            Bucket: 'test-bucket',
-            Key: mockS3Key,
-        });
-
-        expect(handler.event.Records).toEqual([
-            {
-                body: 'message body',
-                receiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
-                messageAttributes: {
-                    MessageAttribute: testMessageAttribute,
-                    S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                },
-            },
-        ]);
-    });
-
-    it('should apply custom receiveTransform function', async () => {
-        // Given
-        const handler = {
-            event: {
-                Records: [
-                    {
-                        body: 'custom message body',
-                        receiptHandle: 'receipthandle',
-                        messageAttributes: {
-                            MessageAttribute: testMessageAttribute,
-                            S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                        },
-                    },
-                ],
-            },
-        };
-
-        const s3Response = {
-            Body: Buffer.from('custom s3 content'),
-        };
-        const s3 = {
-            getObject: jest.fn(() => ({ promise: () => Promise.resolve(s3Response) })),
-        };
-
-        const middleware = new ExtendedSqsClient({}, s3, {
-            bucketName: 'test-bucket',
-            receiveTransform: (message, s3Content) => `${message.body} - ${s3Content}`,
-        }).middleware();
-
-        // When
-        await middleware.before(handler);
-
-        // Then
-        expect(s3.getObject).toHaveBeenCalledTimes(1);
-        expect(s3.getObject.mock.calls[0][0]).toEqual({
-            Bucket: 'test-bucket',
-            Key: mockS3Key,
-        });
-
-        expect(handler.event.Records).toEqual([
-            {
-                body: 'custom message body - custom s3 content',
-                receiptHandle: `-..s3BucketName..-test-bucket-..s3BucketName..--..s3Key..-${mockS3Key}-..s3Key..-receipthandle`,
-                messageAttributes: {
-                    MessageAttribute: testMessageAttribute,
-                    S3MessageBodyKey: s3MessageBodyKeyAttribute,
-                },
-            },
-        ]);
     });
 });

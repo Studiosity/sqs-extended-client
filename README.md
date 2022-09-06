@@ -94,18 +94,6 @@ const sqsExtendedClient = new SqsExtendedClient(sqs, s3,
 );
 ```
 
-## Middleware
-
-If using [Middy](https://github.com/middyjs/middy) middleware with AWS Lambda then the SQS Extended Client provides a middleware implementation:
-
-```Javascript
-const middy = require('@middy/core');
-const SqsExtendedClient = require('sqs-extended-client');
-
-const handler = middy(/* Lambda event handler */)
-    .use(new SqsExtendedClient(sqs, s3).middleware());
-```
-
 ## Test
 
 To execute the unit tests run:

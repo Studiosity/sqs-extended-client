@@ -1,4 +1,4 @@
-const { isLarge, getMessageAttributesSize, DEFAULT_MESSAGE_SIZE_THRESHOLD } = require('../sqsMessageSizeUtils');
+const { isLarge, getMessageSize, getMessageAttributesSize, DEFAULT_MESSAGE_SIZE_THRESHOLD } = require('../sqsMessageSizeUtils');
 
 describe('sqsMessageSizeUtils isLarge', () => {
     it('should handle messages without message attributes', async () => {
@@ -36,6 +36,36 @@ describe('sqsMessageSizeUtils isLarge', () => {
         // When/Then
         expect(isLarge(smallMessage)).toBe(false);
         expect(isLarge(largeMessage)).toBe(true);
+    });
+});
+
+describe('sysMessageSizeUtils getMessageSize', () => {
+    it('should handle messages without message attributes', async () => {
+        // Given
+        const message = {
+            MessageBody: 'x'.repeat(1234),
+        };
+
+        // When/Then
+        expect(getMessageSize(message)).toEqual(1234);
+    });
+
+    it('should handle messages with message attributes', async () => {
+        // Given
+        const messageAttributes = {
+            Attr: {
+                DataType: 'String',
+                StringValue: 'Value',
+            },
+        };
+
+        const message = {
+            MessageBody: 'x'.repeat(4321),
+            MessageAttributes: messageAttributes,
+        };
+
+        // When/Then
+        expect(getMessageSize(message)).toEqual(4321 + getMessageAttributesSize(messageAttributes));
     });
 });
 

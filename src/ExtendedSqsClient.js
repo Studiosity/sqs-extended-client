@@ -1,92 +1,62 @@
 /* eslint-disable no-underscore-dangle */
 const { v4: uuidv4 } = require('uuid');
-const { isLarge } = require('./sqsMessageSizeUtils');
+const { getMessageSize, DEFAULT_MESSAGE_SIZE_THRESHOLD } = require('./sqsMessageSizeUtils');
 
-const S3_MESSAGE_KEY_MARKER = '-..s3Key..-';
+const MESSAGE_POINTER_CLASS = 'com.amazon.sqs.javamessaging.MessageS3Pointer'
+const RECEIPT_HANDLER_MATCHER = /^-\.\.s3BucketName\.\.-(.*)-\.\.s3BucketName\.\.--\.\.s3Key\.\.-(.*)-\.\.s3Key\.\.-(.*)/;
+const RESERVED_ATTRIBUTE_NAME = 'SQSLargePayloadSize';
 const S3_BUCKET_NAME_MARKER = '-..s3BucketName..-';
-
-const S3_MESSAGE_BODY_KEY = 'S3MessageBodyKey';
-
-function defaultSendTransform(alwaysUseS3, messageSizeThreshold) {
-    return (message) => {
-        const useS3 = alwaysUseS3 || isLarge(message, messageSizeThreshold);
-
-        return {
-            messageBody: useS3 ? null : message.MessageBody,
-            s3Content: useS3 ? message.MessageBody : null,
-        };
-    };
-}
-
-function defaultReceiveTransform() {
-    return (message, s3Content) => {
-        return s3Content || message.body || message.Body;
-    };
-}
+const S3_KEY_MARKER = '-..s3Key..-';
 
 function getS3MessageKeyAndBucket(message) {
     const messageAttributes = message.messageAttributes || message.MessageAttributes || {};
 
-    if (!messageAttributes[S3_MESSAGE_BODY_KEY]) {
+    if (!messageAttributes[RESERVED_ATTRIBUTE_NAME]) {
         return {
             bucketName: null,
             s3MessageKey: null,
         };
     }
 
-    const s3MessageKeyAttr = messageAttributes[S3_MESSAGE_BODY_KEY];
-    const s3MessageKey = s3MessageKeyAttr.stringValue || s3MessageKeyAttr.StringValue;
-
-    if (!s3MessageKey) {
-        throw new Error(`Invalid ${S3_MESSAGE_BODY_KEY} message attribute: Missing stringValue/StringValue`);
+    const payload = JSON.parse(message.body || message.Body);
+    if (Array.isArray(payload) && payload.length == 2 && payload[0] === MESSAGE_POINTER_CLASS) {
+        return {
+            bucketName: payload[1]['s3BucketName'],
+            s3MessageKey: payload[1]['s3Key']
+        };
+    } else {
+        return {
+            bucketName: null,
+            s3MessageKey: null,
+        };
     }
-
-    const s3MessageKeyRegexMatch = s3MessageKey.match(/^\((.*)\)(.*)?/);
-
-    return {
-        bucketName: s3MessageKeyRegexMatch[1],
-        s3MessageKey: s3MessageKeyRegexMatch[2],
-    };
 }
 
 function embedS3MarkersInReceiptHandle(bucketName, s3MessageKey, receiptHandle) {
-    return `${S3_BUCKET_NAME_MARKER}${bucketName}${S3_BUCKET_NAME_MARKER}${S3_MESSAGE_KEY_MARKER}${s3MessageKey}${S3_MESSAGE_KEY_MARKER}${receiptHandle}`;
+    return `${S3_BUCKET_NAME_MARKER}${bucketName}${S3_BUCKET_NAME_MARKER}${S3_KEY_MARKER}${s3MessageKey}${S3_KEY_MARKER}${receiptHandle}`;
 }
 
 function extractBucketNameFromReceiptHandle(receiptHandle) {
-    if (receiptHandle.indexOf(S3_BUCKET_NAME_MARKER) >= 0) {
-        return receiptHandle.substring(
-            receiptHandle.indexOf(S3_BUCKET_NAME_MARKER) + S3_BUCKET_NAME_MARKER.length,
-            receiptHandle.lastIndexOf(S3_BUCKET_NAME_MARKER)
-        );
-    }
-
-    return null;
+    const match = receiptHandle.match(RECEIPT_HANDLER_MATCHER);
+    return match ? match[1] : null;
 }
 
 function extractS3MessageKeyFromReceiptHandle(receiptHandle) {
-    if (receiptHandle.indexOf(S3_MESSAGE_KEY_MARKER) >= 0) {
-        return receiptHandle.substring(
-            receiptHandle.indexOf(S3_MESSAGE_KEY_MARKER) + S3_MESSAGE_KEY_MARKER.length,
-            receiptHandle.lastIndexOf(S3_MESSAGE_KEY_MARKER)
-        );
-    }
-
-    return null;
+    const match = receiptHandle.match(RECEIPT_HANDLER_MATCHER);
+    return match ? match[2] : null;
 }
 
-function getOriginReceiptHandle(receiptHandle) {
-    return receiptHandle.indexOf(S3_MESSAGE_KEY_MARKER) >= 0
-        ? receiptHandle.substring(receiptHandle.lastIndexOf(S3_MESSAGE_KEY_MARKER) + S3_MESSAGE_KEY_MARKER.length)
-        : receiptHandle;
+function getOriginalReceiptHandle(receiptHandle) {
+    const match = receiptHandle.match(RECEIPT_HANDLER_MATCHER);
+    return match ? match[3] : receiptHandle;
 }
 
-function addS3MessageKeyAttribute(s3MessageKey, attributes) {
+function addMessageSizeAttribute(messageSize, attributes) {
     return {
         ...attributes,
-        [S3_MESSAGE_BODY_KEY]: {
-            DataType: 'String',
-            StringValue: s3MessageKey,
+        [RESERVED_ATTRIBUTE_NAME]: {
+            DataType: 'Number',
+            StringValue: messageSize.toString(),
         },
     };
 }
@@ -180,10 +150,8 @@ class ExtendedSqsClient {
         this.sqs = sqs;
         this.s3 = s3;
         this.bucketName = options.bucketName;
-
-        this.sendTransform =
-            options.sendTransform || defaultSendTransform(options.alwaysUseS3, options.messageSizeThreshold);
-        this.receiveTransform = options.receiveTransform || defaultReceiveTransform();
+        this.alwaysUseS3 = options.alwaysUseS3;
+        this.messageSizeThreshold = options.messageSizeThreshold || DEFAULT_MESSAGE_SIZE_THRESHOLD;
     }
 
     _storeS3Content(key, s3Content) {
@@ -215,40 +183,11 @@ class ExtendedSqsClient {
         return this.s3.deleteObject(params).promise();
     }
 
-    middleware() {
-        return {
-            before: async ({ event }) => {
-                await Promise.all(
-                    event.Records.map(async (record) => {
-                        const { bucketName, s3MessageKey } = getS3MessageKeyAndBucket(record);
-
-                        if (s3MessageKey) {
-                            /* eslint-disable-next-line no-param-reassign */
-                            record.body = this.receiveTransform(
-                                record,
-                                await this._getS3Content(bucketName, s3MessageKey)
-                            );
-                            /* eslint-disable-next-line no-param-reassign */
-                            record.receiptHandle = embedS3MarkersInReceiptHandle(
-                                bucketName,
-                                s3MessageKey,
-                                record.receiptHandle
-                            );
-                        } else {
-                            /* eslint-disable-next-line no-param-reassign */
-                            record.body = this.receiveTransform(record);
-                        }
-                    })
-                )
-            },
-        };
-    }
-
     changeMessageVisibility(params, callback) {
         return this.sqs.changeMessageVisibility(
             {
                 ...params,
-                ReceiptHandle: getOriginReceiptHandle(params.ReceiptHandle),
+                ReceiptHandle: getOriginalReceiptHandle(params.ReceiptHandle),
             },
             callback
         );
@@ -260,7 +199,7 @@ class ExtendedSqsClient {
                 ...params,
                 Entries: params.Entries.map((entry) => ({
                     ...entry,
-                    ReceiptHandle: getOriginReceiptHandle(entry.ReceiptHandle),
+                    ReceiptHandle: getOriginalReceiptHandle(entry.ReceiptHandle),
                 })),
             },
             callback
@@ -274,7 +213,7 @@ class ExtendedSqsClient {
             s3MessageKey: extractS3MessageKeyFromReceiptHandle(params.ReceiptHandle),
             deleteParams: {
                 ...params,
-                ReceiptHandle: getOriginReceiptHandle(params.ReceiptHandle),
+                ReceiptHandle: getOriginalReceiptHandle(params.ReceiptHandle),
             },
         };
     }
@@ -321,27 +260,26 @@ class ExtendedSqsClient {
 
     _prepareSend(params) {
         const sendParams = { ...params };
-
-        const sendObj = this.sendTransform(sendParams);
-        const existingS3MessageKey =
-            params.MessageAttributes && params.MessageAttributes[ExtendedSqsClient.RESERVED_ATTRIBUTE_NAME];
+        const messageSize = getMessageSize(sendParams);
+        const useS3 = this.alwaysUseS3 || messageSize > this.messageSizeThreshold;
+        const s3Content = useS3 ? sendParams.MessageBody : null;
         let s3MessageKey;
 
-        if (!sendObj.s3Content || existingS3MessageKey) {
-            sendParams.MessageBody = sendObj.messageBody || existingS3MessageKey.StringValue;
-        } else {
+        if (s3Content) {
             s3MessageKey = uuidv4();
-            sendParams.MessageAttributes = addS3MessageKeyAttribute(
-                `(${this.bucketName})${s3MessageKey}`,
-                sendParams.MessageAttributes
+            sendParams.MessageAttributes = addMessageSizeAttribute(messageSize, sendParams.MessageAttributes);
+            sendParams.MessageBody = JSON.stringify(
+              [
+                  MESSAGE_POINTER_CLASS,
+                  { s3BucketName: this.bucketName, s3Key: s3MessageKey }
+              ]
             );
-            sendParams.MessageBody = sendObj.messageBody || s3MessageKey;
         }
 
         return {
             s3MessageKey,
             sendParams,
-            s3Content: sendObj.s3Content,
+            s3Content,
         };
     }
 
@@ -402,19 +340,13 @@ class ExtendedSqsClient {
 
                     if (s3MessageKey) {
                         /* eslint-disable-next-line no-param-reassign */
-                        message.Body = this.receiveTransform(
-                            message,
-                            await this._getS3Content(bucketName, s3MessageKey)
-                        );
+                        message.Body = await this._getS3Content(bucketName, s3MessageKey);
                         /* eslint-disable-next-line no-param-reassign */
                         message.ReceiptHandle = embedS3MarkersInReceiptHandle(
                             bucketName,
                             s3MessageKey,
                             message.ReceiptHandle
                         );
-                    } else {
-                        /* eslint-disable-next-line no-param-reassign */
-                        message.Body = this.receiveTransform(message);
                     }
                 })
             );
@@ -423,14 +355,12 @@ class ExtendedSqsClient {
     receiveMessage(params, callback) {
         const modifiedParams = {
             ...params,
-            MessageAttributeNames: [...(params.MessageAttributeNames || []), ExtendedSqsClient.RESERVED_ATTRIBUTE_NAME],
+            MessageAttributeNames: [...(params.MessageAttributeNames || []), RESERVED_ATTRIBUTE_NAME],
         };
 
         const request = this.sqs.receiveMessage(modifiedParams);
         return wrapRequest(request, callback, invokeFnAfterRequest(request, this._processReceive()));
     }
 }
-
-ExtendedSqsClient.RESERVED_ATTRIBUTE_NAME = S3_MESSAGE_BODY_KEY;
 
 module.exports = ExtendedSqsClient;

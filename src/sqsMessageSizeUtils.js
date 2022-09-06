@@ -24,14 +24,20 @@ function getMessageAttributesSize(messageAttributes) {
 
     return size;
 }
-function isLarge(message, messageSizeThreshold = DEFAULT_MESSAGE_SIZE_THRESHOLD) {
+
+function getMessageSize(message) {
     const messageAttributeSize = getMessageAttributesSize(message.MessageAttributes);
     const bodySize = Buffer.byteLength(message.MessageBody, 'utf8');
-    return messageAttributeSize + bodySize > messageSizeThreshold;
+    return messageAttributeSize + bodySize;
+}
+
+function isLarge(message, messageSizeThreshold = DEFAULT_MESSAGE_SIZE_THRESHOLD) {
+    return getMessageSize(message) > messageSizeThreshold;
 }
 
 module.exports = {
     DEFAULT_MESSAGE_SIZE_THRESHOLD,
     getMessageAttributesSize,
+    getMessageSize,
     isLarge,
 };
