@@ -1,4 +1,4 @@
-const DEFAULT_MESSAGE_SIZE_THRESHOLD = 262144;
+const DEFAULT_MESSAGE_SIZE_THRESHOLD = 256000;
 
 function getMessageAttributesSize(messageAttributes) {
     if (!messageAttributes) {
