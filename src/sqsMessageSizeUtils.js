@@ -28,6 +28,7 @@ function getMessageAttributesSize(messageAttributes) {
 function getMessageSize(message) {
     const messageAttributeSize = getMessageAttributesSize(message.MessageAttributes);
     const bodySize = Buffer.byteLength(message.MessageBody, 'utf8');
+    console.log(`ESC#getMessageSize - bodySize: ${bodySize}, messageAttributeSize: ${messageAttributeSize}`);
     return messageAttributeSize + bodySize;
 }
 

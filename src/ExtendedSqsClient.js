@@ -19,7 +19,7 @@ function getS3MessageKeyAndBucket(message) {
     }
 
     const payload = JSON.parse(message.body || message.Body);
-    if (Array.isArray(payload) && payload.length == 2 && payload[0] === MESSAGE_POINTER_CLASS) {
+    if (Array.isArray(payload) && payload.length === 2 && payload[0] === MESSAGE_POINTER_CLASS) {
         return {
             bucketName: payload[1]['s3BucketName'],
             s3MessageKey: payload[1]['s3Key']
@@ -261,6 +261,7 @@ class ExtendedSqsClient {
     _prepareSend(params) {
         const sendParams = { ...params };
         const messageSize = getMessageSize(sendParams);
+        console.log(`ESC#_prepareSend - alwaysUseS3: ${this.alwaysUseS3}, large message?: ${messageSize > this.messageSizeThreshold}`);
         const useS3 = this.alwaysUseS3 || messageSize > this.messageSizeThreshold;
         const s3Content = useS3 ? sendParams.MessageBody : null;
         let s3MessageKey;
@@ -274,6 +275,7 @@ class ExtendedSqsClient {
                   { s3BucketName: this.bucketName, s3Key: s3MessageKey }
               ]
             );
+            console.log(`ESC#_prepareSend - S3 key: ${s3MessageKey}`);
         }
 
         return {
@@ -291,6 +293,7 @@ class ExtendedSqsClient {
         const { s3MessageKey, sendParams, s3Content } = this._prepareSend(params);
 
         if (!s3MessageKey) {
+            console.log(`ESC#sendMessage - No S3 key, sending body via SQS (size: ${Buffer.byteLength(params.MessageBody, 'utf8')})`);
             return this.sqs.sendMessage(sendParams, callback);
         }
 
